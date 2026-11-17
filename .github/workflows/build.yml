@@ -1,4 +1,4 @@
-name: Build NeonKeys APK
+name: Build NeonKeys APKK
 
 on:
   push:
@@ -16,23 +16,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        
       - name: JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
+        
       - name: Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Gradle 8.14
-        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.14'
-
+            packages: |
+                platform-tools
+                cmdline-tools;latest
+                build-tools;34.0.0
+                platforms;android-34
+                
       - name: Build debug + release APK
-        run: gradle --no-daemon assembleDebug assembleRelease
+        run: ./gradlew --no-daemon assembleDebug assembleRelease
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
