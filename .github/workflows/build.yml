@@ -3,10 +3,17 @@ name: Android CI
 
 on:
   push:
-    branches: [main, master]
-    tags: ['v*']
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+
   pull_request:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+
   workflow_dispatch:
 
 permissions:
@@ -14,57 +21,84 @@ permissions:
 
 jobs:
   build:
-    name: Build APK
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
       - name: Setup JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
+      # OLD WORKING SDK CONFIGURATION — UNCHANGED
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK 36
-        run: |
-          sdkmanager "platforms;android-36" \
-                     "build-tools;36.0.0"
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
-      - name: Grant permission
-        run: chmod +x gradlew
+      - name: Grant execute permission
+        run: chmod +x ./gradlew
 
-      - name: Build APKs
+      - name: Build project
+        run: ./gradlew --no-daemon clean build
+
+      # Find and collect APK files
+      - name: Collect APK files
+        shell: bash
         run: |
-          ./gradlew --no-daemon clean assembleDebug assembleRelease
+          mkdir -p artifacts/debug artifacts/release
 
-      - name: Find generated APKs
-        run: |
-          mkdir -p artifacts
-          find . -type f -path '*/build/outputs/apk/*' \
-            -name '*.apk' -exec cp {} artifacts/ \;
+          while IFS= read -r -d '' apk; do
+            module="${apk%%/build/outputs/apk/*}"
+            module="${module##*/}"
+            filename="${module}-$(basename "$apk")"
 
-          echo "Generated APK files:"
-          ls -lh artifacts/
+            case "$apk" in
+              */debug/*)
+                cp "$apk" "artifacts/debug/$filename"
+                ;;
+              */release/*)
+                cp "$apk" "artifacts/release/$filename"
+                ;;
+            esac
+          done < <(
+            find . -type f \
+              -path '*/build/outputs/apk/*' \
+              -name '*.apk' -print0
+          )
 
-          test -n "$(find artifacts -name '*.apk' -print -quit)"
+          echo "DEBUG APK:"
+          ls -lh artifacts/debug/
 
-      - name: Upload APKs
-        uses: actions/upload-artifact@v4
+          echo "RELEASE APK:"
+          ls -lh artifacts/release/
+
+          test -n "$(find artifacts/debug -name '*.apk' -print -quit)"
+          test -n "$(find artifacts/release -name '*.apk' -print -quit)"
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v7
         with:
-          name: Android-APKs
-          path: artifacts/*.apk
+          name: debug-apk
+          path: artifacts/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-apk
+          path: artifacts/release/*.apk
           if-no-files-found: error
 
   release:
-    name: GitHub Release
+    name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
 
@@ -74,14 +108,15 @@ jobs:
       contents: write
 
     steps:
-      - name: Download APKs
-        uses: actions/download-artifact@v4
+      - name: Download Release APK
+        uses: actions/download-artifact@v8
         with:
-          name: Android-APKs
-          path: artifacts
+          name: release-apk
+          path: release-apk
 
-      - name: Publish Release
-        uses: softprops/action-gh-release@v2
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/*.apk
+          files: release-apk/*.apk
           generate_release_notes: true
+          fail_on_unmatched_files: true
