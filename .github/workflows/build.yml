@@ -1,8 +1,7 @@
 
-name: Build NeonKeys APK
+name: Android CI
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
@@ -10,40 +9,89 @@ on:
     tags:
       - 'v*'
 
+  pull_request:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # 1. Repository
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
+      # 2. Java JDK 21
       - name: Setup JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
+      # 3. Android SDK 36
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "build-tools;36.0.0" \
-            "platforms;android-36"
-
-      - name: Grant Gradle permission
-        run: chmod +x gradlew
-
-      - name: Build APK
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: android-actions/setup-android@v4
         with:
-          name: NeonKeys-APK
-          path: app/build/outputs/apk/debug/*.apk
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      # 4. Gradle setup and cache
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # 5. Gradle wrapper permission
+      - name: Grant execute permission
+        run: chmod +x ./gradlew
+
+      # 6. Build and tests
+      - name: Build project
+        run: ./gradlew --no-daemon clean build
+
+      # 7. Upload Debug APK
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: debug-apk
+          path: '**/build/outputs/apk/**/debug/**/*.apk'
           if-no-files-found: error
+
+      # 8. Upload Release APK
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-apk
+          path: '**/build/outputs/apk/**/release/**/*.apk'
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Download Release APK
+      - name: Download Release APK
+        uses: actions/download-artifact@v8
+        with:
+          name: release-apk
+          path: release-apk
+
+      # 2. Publish GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release-apk/**/*.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true
